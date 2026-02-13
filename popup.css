@@ -1,0 +1,176 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 360px;
+  min-height: 200px;
+  max-height: 520px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 14px;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #ffffff;
+  letter-spacing: 0.3px;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+}
+
+#note-input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  background: #16163a;
+  color: #e0e0e0;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+#note-input::placeholder {
+  color: #6a6a8a;
+}
+
+#note-input:focus {
+  border-color: #7c5cfc;
+}
+
+#add-btn {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 8px;
+  background: #7c5cfc;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+#add-btn:hover {
+  background: #6a4ae0;
+}
+
+#add-btn:active {
+  background: #5838c4;
+}
+
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.notes-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.notes-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.notes-list::-webkit-scrollbar-thumb {
+  background: #2a2a4a;
+  border-radius: 4px;
+}
+
+.note-card {
+  background: #16163a;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.2s;
+}
+
+.note-card:hover {
+  border-color: #3a3a5a;
+}
+
+.note-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #e0e0e0;
+  word-break: break-word;
+}
+
+.note-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.note-timestamp {
+  font-size: 11px;
+  color: #6a6a8a;
+}
+
+.note-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-copy,
+.btn-delete {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.btn-copy {
+  background: #2a2a4a;
+  color: #b0b0d0;
+}
+
+.btn-copy:hover {
+  background: #3a3a5a;
+  color: #ffffff;
+}
+
+.btn-delete {
+  background: #2a1a1a;
+  color: #e06060;
+}
+
+.btn-delete:hover {
+  background: #3a2020;
+  color: #ff7070;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 24px 0;
+  font-size: 13px;
+  color: #5a5a7a;
+}
+
+.empty-state.hidden {
+  display: none;
+}
