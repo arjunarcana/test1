@@ -1,0 +1,20 @@
+{
+  "name": "Meeting Copilot",
+  "version": "0.1.0",
+  "manifest_version": 3,
+  "description": "Live transcription, summaries, and alerts for meetings",
+  "permissions": ["tabCapture", "sidePanel", "storage", "offscreen"],
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_icon": {}
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+  "options_page": "src/settings/index.html",
+  "icons": {}
+}

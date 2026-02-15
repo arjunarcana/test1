@@ -1,0 +1,16 @@
+{
+  "name": "meeting-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Meeting Copilot – live transcription, summaries, and alerts for any meeting source",
+  "workspaces": [
+    "server",
+    "extension"
+  ],
+  "scripts": {
+    "server:dev": "npm run dev --workspace=server",
+    "server:build": "npm run build --workspace=server",
+    "ext:dev": "npm run dev --workspace=extension",
+    "ext:build": "npm run build --workspace=extension"
+  }
+}
