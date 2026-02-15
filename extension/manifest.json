@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "manifest_version": 3,
   "description": "Live transcription, summaries, and alerts for meetings",
-  "permissions": ["tabCapture", "sidePanel", "storage", "offscreen"],
+  "permissions": ["tabCapture", "tabs", "sidePanel", "storage", "offscreen"],
   "action": {
     "default_popup": "src/popup/index.html",
     "default_icon": {}

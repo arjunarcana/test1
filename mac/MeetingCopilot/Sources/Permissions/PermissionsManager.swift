@@ -4,6 +4,7 @@
 // - Screen Recording access (for ScreenCaptureKit system audio capture)
 
 import AVFoundation
+import CoreGraphics
 import Foundation
 import AppKit
 

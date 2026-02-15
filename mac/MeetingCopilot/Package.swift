@@ -17,15 +17,15 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/apple/swift-nio.git",
-            from: "2.50.0"
+            "2.50.0"..<"3.0.0"
         ),
         .package(
             url: "https://github.com/apple/swift-nio-extras.git",
-            from: "1.19.0"
+            "1.19.0"..<"2.0.0"
         ),
         .package(
             url: "https://github.com/vapor/websocket-kit.git",
-            from: "2.14.0"
+            "2.14.0"..<"3.0.0"
         ),
     ],
     targets: [

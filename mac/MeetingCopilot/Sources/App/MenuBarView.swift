@@ -3,6 +3,7 @@
 // Provides controls for audio capture, status display, and permission management.
 
 import SwiftUI
+import AppKit
 
 struct MenuBarView: View {
     @ObservedObject var appState: AppState
@@ -104,6 +105,11 @@ struct MenuBarView: View {
                     Text("Microphone")
                     Spacer()
                     PermissionBadge(state: appState.micPermission)
+                    if appState.micPermission == .denied {
+                        Button("Open Settings") { appState.openMicSettings() }
+                            .font(.caption2)
+                            .buttonStyle(.borderless)
+                    }
                 }
                 .font(.subheadline)
 
@@ -112,6 +118,11 @@ struct MenuBarView: View {
                     Text("Screen Recording")
                     Spacer()
                     PermissionBadge(state: appState.screenPermission)
+                    if appState.screenPermission == .denied {
+                        Button("Open Settings") { appState.openScreenSettings() }
+                            .font(.caption2)
+                            .buttonStyle(.borderless)
+                    }
                 }
                 .font(.subheadline)
 

@@ -252,14 +252,29 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Opens System Settings to the Microphone privacy pane.
+    func openMicSettings() {
+        permissionsManager.openMicrophoneSettings()
+    }
+
+    /// Opens System Settings to the Screen Recording privacy pane.
+    func openScreenSettings() {
+        permissionsManager.openScreenRecordingSettings()
+    }
+
     // MARK: - Bindings
 
     private func setupBindings() {
         // Periodically refresh permissions while not capturing.
+        // Stops polling once both permissions are granted.
         Timer.publish(every: 5.0, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
-                self?.refreshPermissions()
+                guard let self else { return }
+                self.refreshPermissions()
+                if self.micPermission == .granted && self.screenPermission == .granted {
+                    self.cancellables.removeAll()
+                }
             }
             .store(in: &cancellables)
     }
