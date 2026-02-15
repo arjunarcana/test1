@@ -4,12 +4,13 @@
 
 import Foundation
 import NIO
+import NIOHTTP1
 import NIOWebSocket
 import WebSocketKit
 
 /// A local WebSocket server that accepts connections from the Chrome extension,
 /// receives control commands, and streams audio data to connected clients.
-final class WebSocketServer {
+final class WebSocketServer: @unchecked Sendable {
     // MARK: - Callbacks
 
     /// Called when a message is received from any connected client.
@@ -23,29 +24,22 @@ final class WebSocketServer {
     /// The NIO event loop group powering the server.
     private var eventLoopGroup: MultiThreadedEventLoopGroup?
 
-    /// The bound server channel.
-    private var channel: Channel?
-
     /// Thread-safe storage of connected WebSocket clients.
     private let clientsLock = NSLock()
-    private var clients: [WebSocketClient] = []
+    private var clients: [String: WebSocket] = [:]
 
     /// The port the server is listening on.
     private(set) var port: Int = 0
 
     /// JSON encoder for outgoing messages.
-    private let encoder = JSONEncoder()
+    private let encoder: JSONEncoder = {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys]
+        return enc
+    }()
 
     /// JSON decoder for incoming messages.
     private let decoder = JSONDecoder()
-
-    // MARK: - Client Tracking
-
-    /// Represents a single connected WebSocket client.
-    private struct WebSocketClient {
-        let id: String
-        let ws: WebSocket
-    }
 
     /// Current number of connected clients.
     var clientCount: Int {
@@ -59,21 +53,18 @@ final class WebSocketServer {
     /// Starts the WebSocket server on the given host and port.
     ///
     /// - Parameters:
-    ///   - host: The host to bind to. Must be "127.0.0.1" for security.
+    ///   - host: The host to bind to. Forced to "127.0.0.1" for security.
     ///   - port: The port to bind to. Use 0 for a random available port.
     /// - Returns: The actual port the server is listening on.
     @discardableResult
     func start(host: String = "127.0.0.1", port: Int = 0) async throws -> Int {
-        // Security: always bind to localhost only.
+        // Security: always bind to localhost only, regardless of the host parameter.
         let bindHost = "127.0.0.1"
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 2)
         self.eventLoopGroup = group
 
-        let promise = group.next().makePromise(of: Int.self)
-
-        // Set up the WebSocket server using WebSocketKit's upgrade mechanism.
-        let bootstrap = ServerBootstrap(group: group)
+        let server = try await ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.backlog, value: 256)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
@@ -81,88 +72,83 @@ final class WebSocketServer {
                     shouldUpgrade: { channel, head in
                         channel.eventLoop.makeSucceededFuture(HTTPHeaders())
                     },
-                    upgradePipelineHandler: { channel, req in
-                        channel.pipeline.addHandler(
-                            WebSocketHandler(server: self)
-                        )
+                    upgradePipelineHandler: { channel, request in
+                        WebSocket.server(on: channel) { ws in
+                            self.handleNewConnection(ws)
+                        }
                     }
                 )
 
-                let config: NIOHTTPServerUpgradeConfiguration = (
+                let upgradeConfig: NIOHTTPServerUpgradeConfiguration = (
                     upgraders: [upgrader],
-                    completionHandler: { ctx in
-                        // Remove the HTTP handler after upgrade.
-                        ctx.pipeline.removeHandler(name: "HTTPHandler", promise: nil)
+                    completionHandler: { context in
+                        // The HTTP handlers are removed automatically after a successful upgrade.
                     }
                 )
 
                 return channel.pipeline.configureHTTPServerPipeline(
-                    withServerUpgrade: config
-                ).flatMap {
-                    channel.pipeline.addHandler(
-                        HTTPPlaceholderHandler(),
-                        name: "HTTPHandler"
-                    )
-                }
+                    withServerUpgrade: upgradeConfig
+                )
             }
+            .bind(host: bindHost, port: port)
+            .get()
 
-        let serverChannel = try await bootstrap.bind(host: bindHost, port: port).get()
-
-        guard let localAddress = serverChannel.localAddress,
+        guard let localAddress = server.localAddress,
               let actualPort = localAddress.port else {
             throw WebSocketServerError.failedToBindPort
         }
 
-        self.channel = serverChannel
         self.port = actualPort
-
         print("[WebSocketServer] Listening on \(bindHost):\(actualPort)")
 
         return actualPort
     }
 
     /// Stops the WebSocket server and disconnects all clients.
-    func stop() async {
+    func stop() {
         // Close all client connections.
         clientsLock.lock()
         let currentClients = clients
         clients.removeAll()
         clientsLock.unlock()
 
-        for client in currentClients {
-            try? await client.ws.close().get()
+        for (_, ws) in currentClients {
+            ws.close(promise: nil)
         }
 
-        // Shut down the server channel and event loop group.
-        try? await channel?.close()
-        try? await eventLoopGroup?.shutdownGracefully()
-        channel = nil
+        // Shut down the event loop group.
+        do {
+            try eventLoopGroup?.syncShutdownGracefully()
+        } catch {
+            print("[WebSocketServer] Error shutting down: \(error.localizedDescription)")
+        }
         eventLoopGroup = nil
         port = 0
 
         onClientCountChanged?(0)
     }
 
-    // MARK: - Client Management
+    // MARK: - Connection Handling
 
-    /// Registers a new WebSocket connection.
-    func addClient(_ ws: WebSocket) {
+    /// Called when a new WebSocket connection is established.
+    private func handleNewConnection(_ ws: WebSocket) {
         let clientId = UUID().uuidString
-        let client = WebSocketClient(id: clientId, ws: ws)
 
+        // Register the client.
         clientsLock.lock()
-        clients.append(client)
+        clients[clientId] = ws
         let count = clients.count
         clientsLock.unlock()
 
         onClientCountChanged?(count)
         print("[WebSocketServer] Client connected (id: \(clientId), total: \(count))")
 
-        // Set up message handling for this client.
+        // Handle incoming text messages from this client.
         ws.onText { [weak self] _, text in
             self?.handleTextMessage(text)
         }
 
+        // Handle incoming binary messages from this client.
         ws.onBinary { [weak self] _, buffer in
             let data = Data(buffer: buffer)
             if let text = String(data: data, encoding: .utf8) {
@@ -179,7 +165,7 @@ final class WebSocketServer {
     /// Removes a disconnected client by ID.
     private func removeClient(id: String) {
         clientsLock.lock()
-        clients.removeAll { $0.id == id }
+        clients.removeValue(forKey: id)
         let count = clients.count
         clientsLock.unlock()
 
@@ -189,7 +175,7 @@ final class WebSocketServer {
 
     // MARK: - Message Handling
 
-    /// Parses and handles an incoming text message from a client.
+    /// Parses and dispatches an incoming text message from a client.
     private func handleTextMessage(_ text: String) {
         guard let data = text.data(using: .utf8) else { return }
 
@@ -198,7 +184,6 @@ final class WebSocketServer {
             onClientMessage?(message)
         } catch {
             print("[WebSocketServer] Failed to decode client message: \(error.localizedDescription)")
-            // Send an error response back.
             let errorMsg = ServerMessage.error(
                 code: "INVALID_MESSAGE",
                 message: "Failed to parse message: \(error.localizedDescription)"
@@ -217,23 +202,23 @@ final class WebSocketServer {
         }
 
         clientsLock.lock()
-        let currentClients = clients
+        let currentClients = Array(clients.values)
         clientsLock.unlock()
 
-        for client in currentClients {
-            client.ws.send(text)
+        for ws in currentClients {
+            ws.send(text)
         }
     }
 
     /// Sends raw binary data to all connected clients.
     func broadcastBinary(_ data: Data) {
         clientsLock.lock()
-        let currentClients = clients
+        let currentClients = Array(clients.values)
         clientsLock.unlock()
 
         let byteArray = [UInt8](data)
-        for client in currentClients {
-            client.ws.send(byteArray)
+        for ws in currentClients {
+            ws.send(byteArray)
         }
     }
 }
@@ -247,97 +232,6 @@ enum WebSocketServerError: LocalizedError {
         switch self {
         case .failedToBindPort:
             return "Failed to bind to a local port."
-        }
-    }
-}
-
-// MARK: - NIO Channel Handlers
-
-/// Handles WebSocket frames after the HTTP upgrade is complete.
-private final class WebSocketHandler: ChannelInboundHandler {
-    typealias InboundIn = WebSocketFrame
-    typealias OutboundOut = WebSocketFrame
-
-    private weak var server: WebSocketServer?
-    private var webSocket: WebSocket?
-
-    init(server: WebSocketServer) {
-        self.server = server
-    }
-
-    func handlerAdded(context: ChannelHandlerContext) {
-        let ws = WebSocket(channel: context.channel, type: .server)
-        self.webSocket = ws
-        server?.addClient(ws)
-    }
-
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        let frame = unwrapInboundIn(data)
-        webSocket?.handle(incoming: frame)
-    }
-
-    func channelInactive(context: ChannelHandlerContext) {
-        _ = webSocket?.close()
-        context.fireChannelInactive()
-    }
-
-    func errorCaught(context: ChannelHandlerContext, error: Error) {
-        print("[WebSocketHandler] Error: \(error.localizedDescription)")
-        context.close(promise: nil)
-    }
-}
-
-/// Placeholder HTTP handler that responds to non-upgrade requests.
-/// This is removed from the pipeline once the WebSocket upgrade succeeds.
-private final class HTTPPlaceholderHandler: ChannelInboundHandler {
-    typealias InboundIn = HTTPServerRequestPart
-    typealias OutboundOut = HTTPServerResponsePart
-
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        let part = unwrapInboundIn(data)
-
-        switch part {
-        case .head(let head):
-            // Respond with a simple status page for non-WebSocket requests.
-            if head.uri == "/health" {
-                let response = HTTPResponseHead(version: head.version, status: .ok)
-                context.write(wrapOutboundOut(.head(response)), promise: nil)
-                var body = context.channel.allocator.buffer(capacity: 0)
-                body.writeString("{\"status\":\"ok\"}")
-                context.write(wrapOutboundOut(.body(.byteBuffer(body))), promise: nil)
-                context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
-            }
-
-        case .body, .end:
-            break
-        }
-    }
-}
-
-// MARK: - WebSocket Extension
-
-/// Extension to provide a handler for incoming WebSocket frames.
-extension WebSocket {
-    fileprivate func handle(incoming frame: WebSocketFrame) {
-        switch frame.opcode {
-        case .text:
-            var data = frame.unmaskedData
-            if let text = data.readString(length: data.readableBytes) {
-                onText.callbacks.forEach { $0(self, text) }
-            }
-
-        case .binary:
-            let data = frame.unmaskedData
-            onBinary.callbacks.forEach { $0(self, data) }
-
-        case .connectionClose:
-            _ = close()
-
-        case .ping:
-            pong()
-
-        default:
-            break
         }
     }
 }

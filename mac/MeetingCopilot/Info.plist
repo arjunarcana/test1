@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Bundle Identity -->
+    <key>CFBundleName</key>
+    <string>Meeting Copilot</string>
+    <key>CFBundleDisplayName</key>
+    <string>Meeting Copilot</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.meetingcopilot.companion</string>
+    <key>CFBundleExecutable</key>
+    <string>MeetingCopilot</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <!-- Version Information -->
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+
+    <!-- Menu Bar App: Hide from Dock -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- Minimum macOS Version (ScreenCaptureKit requires 13.0+) -->
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+
+    <!-- Privacy Usage Descriptions -->
+
+    <!-- Microphone: Required for capturing meeting audio input -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Meeting Copilot needs microphone access to capture meeting audio for transcription.</string>
+
+    <!-- Screen Capture: Required for ScreenCaptureKit system audio capture -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Meeting Copilot needs Screen Recording access to capture system audio from meeting applications for transcription.</string>
+
+    <!-- Network: Local WebSocket server for Chrome extension communication -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Meeting Copilot runs a local WebSocket server to communicate with the Chrome extension.</string>
+
+    <!-- App Transport Security: Allow local connections -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+
+    <!-- Supported Interface Orientations (not applicable but required) -->
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+</dict>
+</plist>
