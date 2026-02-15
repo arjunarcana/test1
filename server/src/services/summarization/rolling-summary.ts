@@ -29,8 +29,8 @@ export class RollingSummaryService {
   private currentSummary = "";
 
   constructor() {
-    this.openai = config.openaiApiKey
-      ? new OpenAI({ apiKey: config.openaiApiKey })
+    this.openai = config.llmApiKey
+      ? new OpenAI({ apiKey: config.llmApiKey, baseURL: config.llmBaseUrl })
       : null;
   }
 
@@ -67,7 +67,7 @@ export class RollingSummaryService {
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: config.llmModel,
         temperature: 0.3,
         max_tokens: 300,
         messages: [

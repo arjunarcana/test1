@@ -33,8 +33,8 @@ export class GlobalSummaryService {
   private currentSummary = "";
 
   constructor() {
-    this.openai = config.openaiApiKey
-      ? new OpenAI({ apiKey: config.openaiApiKey })
+    this.openai = config.llmApiKey
+      ? new OpenAI({ apiKey: config.llmApiKey, baseURL: config.llmBaseUrl })
       : null;
   }
 
@@ -70,7 +70,7 @@ export class GlobalSummaryService {
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: config.llmModel,
         temperature: 0.3,
         max_tokens: 800,
         messages: [
@@ -112,7 +112,7 @@ export class GlobalSummaryService {
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: config.llmModel,
         temperature: 0.2,
         max_tokens: 400,
         messages: [

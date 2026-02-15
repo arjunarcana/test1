@@ -40,8 +40,8 @@ export class SummarizationOrchestrator {
     this.rollingSummary = new RollingSummaryService();
     this.globalSummary = new GlobalSummaryService();
     this.mentionsDetector = new MentionsDetector(watchNames);
-    this.openai = config.openaiApiKey
-      ? new OpenAI({ apiKey: config.openaiApiKey })
+    this.openai = config.llmApiKey
+      ? new OpenAI({ apiKey: config.llmApiKey, baseURL: config.llmBaseUrl })
       : null;
   }
 
@@ -139,7 +139,7 @@ export class SummarizationOrchestrator {
           : fullTranscript;
 
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: config.llmModel,
         temperature: 0.3,
         max_tokens: 1500,
         messages: [

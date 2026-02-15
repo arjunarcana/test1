@@ -16,8 +16,12 @@ export interface Config {
   transcriptionProvider: "mock" | "deepgram";
   /** Deepgram API key (required when transcriptionProvider is "deepgram") */
   deepgramApiKey: string;
-  /** OpenAI API key (optional; summarization degrades gracefully without it) */
-  openaiApiKey: string;
+  /** LLM API key (optional; summarization degrades gracefully without it) */
+  llmApiKey: string;
+  /** LLM base URL (OpenAI-compatible endpoint) */
+  llmBaseUrl: string;
+  /** LLM model identifier */
+  llmModel: string;
   /** 32-byte hex key for AES-256-GCM encryption. Empty string disables encryption. */
   encryptionKey: string;
   /** Pino log level */
@@ -35,7 +39,11 @@ export const config: Config = {
     (process.env.TRANSCRIPTION_PROVIDER as Config["transcriptionProvider"]) ??
     "mock",
   deepgramApiKey: process.env.DEEPGRAM_API_KEY ?? "",
-  openaiApiKey: process.env.OPENAI_API_KEY ?? "",
+  llmApiKey: process.env.LLM_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
+  llmBaseUrl:
+    process.env.LLM_BASE_URL ?? "https://openrouter.ai/api/v1",
+  llmModel:
+    process.env.LLM_MODEL ?? "arcee-ai/trinity-large-preview:free",
   encryptionKey: process.env.ENCRYPTION_KEY ?? "",
   logLevel: process.env.LOG_LEVEL ?? "info",
 };
