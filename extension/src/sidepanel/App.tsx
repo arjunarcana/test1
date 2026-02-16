@@ -194,10 +194,8 @@ export default function App() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const shouldRestartRef = useRef(false);
   const segCounterRef = useRef(0);
-  const [micStatus, setMicStatus] = useState<'idle' | 'requesting' | 'listening' | 'error'>('idle');
+  const [micStatus, setMicStatus] = useState<'idle' | 'listening' | 'error'>('idle');
   const [micError, setMicError] = useState<string | null>(null);
-  // Keep a ref so the stream can be stopped on cleanup
-  const micStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     const isRecording = session.status === 'recording';
@@ -205,7 +203,6 @@ export default function App() {
     if (isRecording && SpeechRecognitionCtor && !recognitionRef.current) {
       shouldRestartRef.current = true;
       segCounterRef.current = 0;
-      setMicStatus('requesting');
       setMicError(null);
 
       const langMap: Record<string, string> = {
@@ -217,19 +214,8 @@ export default function App() {
         const settings = await getSettings();
         const lang = langMap[settings.language] ?? 'en-US';
 
-        // Request mic permission explicitly — this triggers Chrome's permission
-        // dialog if not already granted. SpeechRecognition alone won't prompt.
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          micStreamRef.current = stream;
-          // Keep the stream alive — SpeechRecognition needs the mic available
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Microphone access denied';
-          setMicStatus('error');
-          setMicError(msg);
-          return;
-        }
-
+        // Mic permission was already granted from the popup before recording
+        // started, so SpeechRecognition can access the mic directly here.
         const createRecognition = () => {
           if (!shouldRestartRef.current || !SpeechRecognitionCtor) return;
 
@@ -274,6 +260,7 @@ export default function App() {
             const e = event as { error: string };
             if (e.error === 'no-speech' || e.error === 'aborted') return;
             console.error('[sidepanel] Speech error:', e.error);
+            setMicStatus('error');
             setMicError(`Speech error: ${e.error}`);
           };
 
@@ -300,16 +287,10 @@ export default function App() {
       startRecognition();
     }
 
-    if (!isRecording && (recognitionRef.current || micStreamRef.current)) {
+    if (!isRecording && recognitionRef.current) {
       shouldRestartRef.current = false;
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort(); } catch { /* already stopped */ }
-        recognitionRef.current = null;
-      }
-      if (micStreamRef.current) {
-        micStreamRef.current.getTracks().forEach((t) => t.stop());
-        micStreamRef.current = null;
-      }
+      try { recognitionRef.current.abort(); } catch { /* already stopped */ }
+      recognitionRef.current = null;
       setMicStatus('idle');
       setMicError(null);
     }
@@ -380,11 +361,9 @@ export default function App() {
             {isActive
               ? micStatus === 'listening'
                 ? 'Listening'
-                : micStatus === 'requesting'
-                  ? 'Requesting mic...'
-                  : micStatus === 'error'
-                    ? 'Mic Error'
-                    : 'Recording'
+                : micStatus === 'error'
+                  ? 'Mic Error'
+                  : 'Recording'
               : session.status === 'error'
                 ? 'Error'
                 : 'Idle'}
