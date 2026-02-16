@@ -1,0 +1,87 @@
+{
+  "../../../../@crx/manifest": {
+    "file": "assets/crx-manifest.js-NKczUGdF.js",
+    "name": "crx-manifest.js",
+    "src": "../../../../@crx/manifest",
+    "isEntry": true
+  },
+  "_client-Cmjl_fXq.js": {
+    "file": "assets/client-Cmjl_fXq.js",
+    "name": "client"
+  },
+  "_modulepreload-polyfill-B5Qt9EMX.js": {
+    "file": "assets/modulepreload-polyfill-B5Qt9EMX.js",
+    "name": "modulepreload-polyfill"
+  },
+  "_protocol-kmljUzcj.js": {
+    "file": "assets/protocol-kmljUzcj.js",
+    "name": "protocol"
+  },
+  "_storage-Dt3L_q3R.js": {
+    "file": "assets/storage-Dt3L_q3R.js",
+    "name": "storage",
+    "imports": [
+      "_types-BkgCnA4V.js"
+    ]
+  },
+  "_types-BkgCnA4V.js": {
+    "file": "assets/types-BkgCnA4V.js",
+    "name": "types"
+  },
+  "src/background/service-worker.ts": {
+    "file": "assets/service-worker.ts-CPFXD6py.js",
+    "name": "service-worker.ts",
+    "src": "src/background/service-worker.ts",
+    "isEntry": true,
+    "imports": [
+      "_types-BkgCnA4V.js",
+      "_protocol-kmljUzcj.js",
+      "_storage-Dt3L_q3R.js"
+    ]
+  },
+  "src/offscreen/index.html": {
+    "file": "assets/offscreen-BRnnwY1E.js",
+    "name": "offscreen",
+    "src": "src/offscreen/index.html",
+    "isEntry": true,
+    "imports": [
+      "_modulepreload-polyfill-B5Qt9EMX.js",
+      "_protocol-kmljUzcj.js"
+    ]
+  },
+  "src/popup/index.html": {
+    "file": "assets/index.html-DvUKrnjk.js",
+    "name": "index.html",
+    "src": "src/popup/index.html",
+    "isEntry": true,
+    "imports": [
+      "_modulepreload-polyfill-B5Qt9EMX.js",
+      "_client-Cmjl_fXq.js",
+      "_protocol-kmljUzcj.js"
+    ]
+  },
+  "src/settings/index.html": {
+    "file": "assets/settings-D-iMEwLz.js",
+    "name": "settings",
+    "src": "src/settings/index.html",
+    "isEntry": true,
+    "imports": [
+      "_modulepreload-polyfill-B5Qt9EMX.js",
+      "_client-Cmjl_fXq.js",
+      "_types-BkgCnA4V.js",
+      "_storage-Dt3L_q3R.js"
+    ]
+  },
+  "src/sidepanel/index.html": {
+    "file": "assets/index.html-92m7Yifg.js",
+    "name": "index.html",
+    "src": "src/sidepanel/index.html",
+    "isEntry": true,
+    "imports": [
+      "_modulepreload-polyfill-B5Qt9EMX.js",
+      "_client-Cmjl_fXq.js",
+      "_types-BkgCnA4V.js",
+      "_protocol-kmljUzcj.js"
+    ]
+  }
+}

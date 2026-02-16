@@ -1,0 +1,1 @@
+const n={names:[],language:"en",diarizationEnabled:!0,backendUrl:"ws://localhost:3001",nativeBridgePort:null,retentionDays:30,transcriptionProvider:"mock"},l={status:"idle",sessionId:null,source:"auto",segments:[],rollingSummary:null,globalSummary:null,mentions:[],startedAt:null,error:null};export{n as D,l as a};

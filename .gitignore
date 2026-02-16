@@ -8,8 +8,7 @@ build/
 *.swp
 *.swo
 
-# Extension build
-extension/dist/
+# Extension build (dist committed for easy loading)
 
 # Server
 server/dist/
