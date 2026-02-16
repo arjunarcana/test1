@@ -30,48 +30,15 @@ function generateSessionId(): string {
   return `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/* ─── Offscreen document management ───────────────────────────────────────── */
-
-let offscreenCreated = false;
-
-async function ensureOffscreenDocument(): Promise<void> {
-  if (offscreenCreated) return;
-
-  const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
-  });
-
-  if (existingContexts.length > 0) {
-    offscreenCreated = true;
-    return;
-  }
-
-  await chrome.offscreen.createDocument({
-    url: 'src/offscreen/index.html',
-    reasons: [chrome.offscreen.Reason.USER_MEDIA],
-    justification: 'Speech recognition for meeting transcription',
-  });
-  offscreenCreated = true;
-}
-
-async function closeOffscreenDocument(): Promise<void> {
-  if (!offscreenCreated) return;
-  try {
-    await chrome.offscreen.closeDocument();
-  } catch {
-    // Document may already be closed
-  }
-  offscreenCreated = false;
-}
-
 /* ─── Recording lifecycle ─────────────────────────────────────────────────── */
 
 async function startRecording(source: CaptureSource): Promise<void> {
-  const settings = await getSettings();
-
   const sessionId = generateSessionId();
+
+  // Transition straight to 'recording' — the side panel will pick up
+  // the status change and start SpeechRecognition in its own page context.
   broadcastState({
-    status: 'connecting',
+    status: 'recording',
     sessionId,
     source,
     segments: [],
@@ -81,55 +48,10 @@ async function startRecording(source: CaptureSource): Promise<void> {
     startedAt: Date.now(),
     error: null,
   });
-
-  try {
-    await ensureOffscreenDocument();
-
-    // Map language code to BCP-47 format for Speech Recognition
-    const langMap: Record<string, string> = {
-      en: 'en-US',
-      es: 'es-ES',
-      fr: 'fr-FR',
-      de: 'de-DE',
-      pt: 'pt-BR',
-      ja: 'ja-JP',
-      zh: 'zh-CN',
-    };
-    const language = langMap[settings.language] ?? 'en-US';
-
-    // Tell offscreen to start speech recognition
-    await chrome.runtime.sendMessage({
-      type: MSG.OFFSCREEN_START_MIC,
-      target: 'offscreen',
-      payload: { language },
-    });
-
-    broadcastState({ status: 'recording' });
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : 'Failed to start recording';
-    broadcastState({ status: 'error', error: errorMessage });
-    await cleanupRecording();
-    throw err;
-  }
 }
 
 async function stopRecording(): Promise<void> {
-  await cleanupRecording();
   broadcastState({ status: 'stopped' });
-}
-
-async function cleanupRecording(): Promise<void> {
-  // Stop speech recognition
-  try {
-    await chrome.runtime.sendMessage({
-      type: MSG.OFFSCREEN_STOP,
-      target: 'offscreen',
-    });
-  } catch {
-    // Offscreen document may already be closed
-  }
-
-  await closeOffscreenDocument();
 }
 
 /* ─── Message listener ────────────────────────────────────────────────────── */
@@ -176,9 +98,9 @@ chrome.runtime.onMessage.addListener(
         return false;
       }
 
-      /* ─── Transcript messages from offscreen ─────────────────────────── */
+      /* ─── Transcript messages from side panel ────────────────────────── */
 
-      case MSG.OFFSCREEN_TRANSCRIPT_PARTIAL: {
+      case MSG.TRANSCRIPT_PARTIAL: {
         const { id, text, timestamp } = message.payload as {
           id: string;
           text: string;
@@ -201,7 +123,7 @@ chrome.runtime.onMessage.addListener(
         return false;
       }
 
-      case MSG.OFFSCREEN_TRANSCRIPT_FINAL: {
+      case MSG.TRANSCRIPT_FINAL: {
         const { id, text, timestamp } = message.payload as {
           id: string;
           text: string;
@@ -224,12 +146,6 @@ chrome.runtime.onMessage.addListener(
 
         // Check for name mentions
         checkMentions(text, timestamp);
-        return false;
-      }
-
-      case MSG.OFFSCREEN_SPEECH_ERROR: {
-        const error = (message.payload?.error as string) ?? 'Speech recognition error';
-        broadcastState({ status: 'error', error });
         return false;
       }
 

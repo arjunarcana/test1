@@ -4,11 +4,9 @@
   "manifest_version": 3,
   "description": "Live transcription, summaries, and alerts for meetings",
   "permissions": [
-    "tabCapture",
     "tabs",
     "sidePanel",
-    "storage",
-    "offscreen"
+    "storage"
   ],
   "action": {
     "default_popup": "src/popup/index.html",

@@ -1,12 +1,42 @@
-import React, { useState, useEffect, useCallback, type CSSProperties } from 'react';
+import React, { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
 import type { SessionState, TranscriptSegment, RollingSummary, MentionEvent } from '../shared/types.ts';
 import { DEFAULT_SESSION_STATE } from '../shared/types.ts';
 import { MSG } from '../shared/protocol.ts';
+import { getSettings } from '../shared/storage.ts';
 import Transcript from './components/Transcript.tsx';
 import RollingSummaryCard from './components/RollingSummary.tsx';
 import SummarySoFar from './components/SummarySoFar.tsx';
 import Mentions from './components/Mentions.tsx';
 import SessionComplete from './components/SessionComplete.tsx';
+
+/* ─── SpeechRecognition types (Chrome uses webkit prefix) ──────────────── */
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onresult: ((event: unknown) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  abort(): void;
+  stop(): void;
+}
+
+interface SpeechResultItem {
+  isFinal: boolean;
+  0: { transcript: string };
+}
+
+interface SpeechResultEvent {
+  resultIndex: number;
+  results: { length: number; [i: number]: SpeechResultItem };
+}
+
+const SpeechRecognitionCtor = (
+  window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike }
+).webkitSpeechRecognition;
 
 /* ─── Styles ──────────────────────────────────────────────────────────────── */
 
@@ -159,6 +189,112 @@ export default function App() {
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
+
+  // ─── Speech Recognition: runs in side panel page context ─────────────────
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const shouldRestartRef = useRef(false);
+  const segCounterRef = useRef(0);
+
+  useEffect(() => {
+    const isRecording = session.status === 'recording';
+
+    if (isRecording && SpeechRecognitionCtor && !recognitionRef.current) {
+      shouldRestartRef.current = true;
+      segCounterRef.current = 0;
+
+      const langMap: Record<string, string> = {
+        en: 'en-US', es: 'es-ES', fr: 'fr-FR',
+        de: 'de-DE', pt: 'pt-BR', ja: 'ja-JP', zh: 'zh-CN',
+      };
+
+      const startRecognition = async () => {
+        const settings = await getSettings();
+        const lang = langMap[settings.language] ?? 'en-US';
+
+        const createRecognition = () => {
+          if (!shouldRestartRef.current || !SpeechRecognitionCtor) return;
+
+          const rec = new SpeechRecognitionCtor();
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.lang = lang;
+          rec.maxAlternatives = 1;
+          recognitionRef.current = rec;
+
+          rec.onresult = (event: unknown) => {
+            const e = event as SpeechResultEvent;
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+              const result = e.results[i];
+              const text = result[0].transcript.trim();
+              if (!text) continue;
+
+              if (result.isFinal) {
+                segCounterRef.current++;
+                chrome.runtime.sendMessage({
+                  type: MSG.TRANSCRIPT_FINAL,
+                  payload: {
+                    id: `seg_${segCounterRef.current}`,
+                    text,
+                    timestamp: Date.now(),
+                  },
+                }).catch(() => {});
+              } else {
+                chrome.runtime.sendMessage({
+                  type: MSG.TRANSCRIPT_PARTIAL,
+                  payload: {
+                    id: `seg_${segCounterRef.current + 1}`,
+                    text,
+                    timestamp: Date.now(),
+                  },
+                }).catch(() => {});
+              }
+            }
+          };
+
+          rec.onerror = (event: unknown) => {
+            const e = event as { error: string };
+            if (e.error === 'no-speech' || e.error === 'aborted') return;
+            console.error('[sidepanel] Speech error:', e.error);
+          };
+
+          rec.onend = () => {
+            recognitionRef.current = null;
+            if (shouldRestartRef.current) {
+              setTimeout(() => createRecognition(), 100);
+            }
+          };
+
+          try {
+            rec.start();
+          } catch (err) {
+            console.error('[sidepanel] Failed to start recognition:', err);
+          }
+        };
+
+        createRecognition();
+      };
+
+      startRecognition();
+    }
+
+    if (!isRecording && recognitionRef.current) {
+      shouldRestartRef.current = false;
+      try {
+        recognitionRef.current.abort();
+      } catch { /* already stopped */ }
+      recognitionRef.current = null;
+    }
+
+    return () => {
+      if (!isRecording) {
+        shouldRestartRef.current = false;
+        if (recognitionRef.current) {
+          try { recognitionRef.current.abort(); } catch { /* ok */ }
+          recognitionRef.current = null;
+        }
+      }
+    };
+  }, [session.status]);
 
   // Elapsed timer
   useEffect(() => {
