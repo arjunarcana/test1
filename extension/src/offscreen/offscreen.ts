@@ -1,131 +1,142 @@
 // offscreen.ts
-// Runs inside the offscreen document to capture audio using Web APIs
-// (getUserMedia for mic, navigator.mediaDevices for tab capture).
-// Service workers cannot access these APIs directly, so the offscreen
-// document handles capture and sends PCM16 base64 chunks back to the
-// service worker via chrome.runtime.sendMessage.
+// Runs inside the offscreen document to transcribe speech using the
+// Web Speech API (SpeechRecognition). This removes the need for a
+// backend server — all transcription happens in the browser via
+// Chrome's built-in speech recognition.
 
 import { MSG } from '../shared/protocol.ts';
 
-const SAMPLE_RATE = 16000;
-const BUFFER_SIZE = 4096; // Frames per processing chunk
+/* ─── SpeechRecognition types (Chrome uses webkit prefix) ──────────────── */
 
-let audioContext: AudioContext | null = null;
-let mediaStream: MediaStream | null = null;
-let scriptProcessor: ScriptProcessorNode | null = null;
-
-/**
- * Converts Float32 audio samples to base64-encoded Int16 PCM.
- */
-function float32ToBase64Int16(float32Array: Float32Array): string {
-  const int16Array = new Int16Array(float32Array.length);
-  for (let i = 0; i < float32Array.length; i++) {
-    const clamped = Math.max(-1, Math.min(1, float32Array[i]));
-    int16Array[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-  }
-  const bytes = new Uint8Array(int16Array.buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onresult: ((event: unknown) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  abort(): void;
 }
 
+const SpeechRecognitionCtor = (
+  globalThis as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike }
+).webkitSpeechRecognition;
+
+let recognition: SpeechRecognitionLike | null = null;
+let segmentCounter = 0;
+let shouldRestart = false;
+let currentLanguage = 'en-US';
+
 /**
- * Sets up the audio processing pipeline:
- * MediaStream -> AudioContext -> ScriptProcessor -> base64 chunks -> service worker
+ * Starts speech recognition for microphone input.
+ * SpeechRecognition captures audio from the default mic internally —
+ * no need for getUserMedia or manual audio processing.
  */
-function setupAudioPipeline(stream: MediaStream): void {
-  mediaStream = stream;
-
-  audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
-  const source = audioContext.createMediaStreamSource(stream);
-
-  // ScriptProcessorNode for raw PCM access (deprecated but widely supported;
-  // AudioWorklet is not available in offscreen documents in all Chrome versions).
-  scriptProcessor = audioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
-
-  scriptProcessor.onaudioprocess = (event) => {
-    const inputData = event.inputBuffer.getChannelData(0);
-    const base64Data = float32ToBase64Int16(inputData);
-
-    // Send audio chunk to service worker
+function startSpeechRecognition(language: string): void {
+  if (!SpeechRecognitionCtor) {
     chrome.runtime.sendMessage({
-      type: MSG.OFFSCREEN_AUDIO_CHUNK,
-      payload: { data: base64Data },
-    }).catch(() => {
-      // Service worker may not be listening
-    });
+      type: MSG.OFFSCREEN_SPEECH_ERROR,
+      payload: { error: 'Speech recognition is not supported in this browser.' },
+    }).catch(() => {});
+    return;
+  }
+
+  stopSpeechRecognition();
+
+  currentLanguage = language;
+  segmentCounter = 0;
+  shouldRestart = true;
+
+  createAndStartRecognition();
+}
+
+function createAndStartRecognition(): void {
+  if (!SpeechRecognitionCtor || !shouldRestart) return;
+
+  recognition = new SpeechRecognitionCtor();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = currentLanguage;
+  recognition.maxAlternatives = 1;
+
+  recognition.onresult = (event: unknown) => {
+    const e = event as { resultIndex: number; results: { length: number; [i: number]: { isFinal: boolean; 0: { transcript: string } } } };
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const result = e.results[i];
+      const text = result[0].transcript.trim();
+      if (!text) continue;
+
+      if (result.isFinal) {
+        segmentCounter++;
+        chrome.runtime.sendMessage({
+          type: MSG.OFFSCREEN_TRANSCRIPT_FINAL,
+          payload: {
+            id: `seg_${segmentCounter}`,
+            text,
+            timestamp: Date.now(),
+          },
+        }).catch(() => {});
+      } else {
+        chrome.runtime.sendMessage({
+          type: MSG.OFFSCREEN_TRANSCRIPT_PARTIAL,
+          payload: {
+            id: `seg_${segmentCounter + 1}`,
+            text,
+            timestamp: Date.now(),
+          },
+        }).catch(() => {});
+      }
+    }
   };
 
-  source.connect(scriptProcessor);
-  scriptProcessor.connect(audioContext.destination);
-}
+  recognition.onerror = (event: unknown) => {
+    const e = event as { error: string };
+    // 'no-speech' is normal — just means silence, keep going
+    if (e.error === 'no-speech') return;
+    // 'aborted' happens when we intentionally stop
+    if (e.error === 'aborted') return;
 
-/**
- * Starts microphone capture using getUserMedia.
- */
-async function startMicCapture(): Promise<void> {
-  stopCapture();
+    console.error('[offscreen] Speech recognition error:', e.error);
+    chrome.runtime.sendMessage({
+      type: MSG.OFFSCREEN_SPEECH_ERROR,
+      payload: { error: `Speech recognition error: ${e.error}` },
+    }).catch(() => {});
+  };
 
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      sampleRate: SAMPLE_RATE,
-      channelCount: 1,
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    },
-    video: false,
-  });
+  recognition.onend = () => {
+    // Auto-restart if we should still be recording
+    // (SpeechRecognition stops automatically after silence or time limits)
+    if (shouldRestart) {
+      setTimeout(() => createAndStartRecognition(), 100);
+    }
+  };
 
-  setupAudioPipeline(stream);
-}
-
-/**
- * Starts tab audio capture using a stream ID from the service worker.
- * The service worker obtains the streamId via chrome.tabCapture.getMediaStreamId().
- */
-async function startTabCapture(streamId: string): Promise<void> {
-  stopCapture();
-
-  // Use the stream ID to get a MediaStream for the tab's audio.
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      mandatory: {
-        chromeMediaSource: 'tab',
-        chromeMediaSourceId: streamId,
-      },
-    } as MediaStreamConstraints['audio'],
-    video: false,
-  });
-
-  setupAudioPipeline(stream);
-}
-
-/**
- * Stops all active audio capture and cleans up resources.
- */
-function stopCapture(): void {
-  if (scriptProcessor) {
-    scriptProcessor.disconnect();
-    scriptProcessor = null;
-  }
-
-  if (audioContext) {
-    audioContext.close().catch(() => {});
-    audioContext = null;
-  }
-
-  if (mediaStream) {
-    mediaStream.getTracks().forEach((track) => track.stop());
-    mediaStream = null;
+  try {
+    recognition.start();
+  } catch (err) {
+    console.error('[offscreen] Failed to start recognition:', err);
   }
 }
 
 /**
- * Listen for messages from the service worker.
+ * Stops speech recognition.
  */
+function stopSpeechRecognition(): void {
+  shouldRestart = false;
+  if (recognition) {
+    try {
+      recognition.abort();
+    } catch {
+      // Already stopped
+    }
+    recognition = null;
+  }
+}
+
+/* ─── Message listener ─────────────────────────────────────────────────── */
+
 chrome.runtime.onMessage.addListener(
   (
     message: { type: string; target?: string; payload?: Record<string, unknown> },
@@ -136,30 +147,15 @@ chrome.runtime.onMessage.addListener(
     if (message.target !== 'offscreen') return;
 
     switch (message.type) {
-      case MSG.OFFSCREEN_START_MIC:
-        startMicCapture()
-          .then(() => sendResponse({ success: true }))
-          .catch((err) =>
-            sendResponse({ success: false, error: err instanceof Error ? err.message : 'Mic capture failed' }),
-          );
-        return true; // Keep channel open for async
-
-      case MSG.OFFSCREEN_START_TAB: {
-        const streamId = message.payload?.streamId as string;
-        if (!streamId) {
-          sendResponse({ success: false, error: 'No streamId provided' });
-          return false;
-        }
-        startTabCapture(streamId)
-          .then(() => sendResponse({ success: true }))
-          .catch((err) =>
-            sendResponse({ success: false, error: err instanceof Error ? err.message : 'Tab capture failed' }),
-          );
-        return true;
+      case MSG.OFFSCREEN_START_MIC: {
+        const language = (message.payload?.language as string) ?? 'en-US';
+        startSpeechRecognition(language);
+        sendResponse({ success: true });
+        return false;
       }
 
       case MSG.OFFSCREEN_STOP:
-        stopCapture();
+        stopSpeechRecognition();
         sendResponse({ success: true });
         return false;
     }

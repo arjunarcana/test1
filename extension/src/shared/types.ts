@@ -39,20 +39,14 @@ export interface UserSettings {
   names: string[];
   language: string;
   diarizationEnabled: boolean;
-  backendUrl: string;
-  nativeBridgePort: number | null;
   retentionDays: number;
-  transcriptionProvider: 'mock' | 'deepgram';
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
   names: [],
   language: 'en',
   diarizationEnabled: true,
-  backendUrl: 'ws://localhost:3001',
-  nativeBridgePort: null,
   retentionDays: 30,
-  transcriptionProvider: 'mock',
 };
 
 export const DEFAULT_SESSION_STATE: SessionState = {

@@ -161,7 +161,7 @@ const pulseKeyframes = `
 /* ─── Source labels ────────────────────────────────────────────────────────── */
 
 const sourceLabels: Record<CaptureSource, string> = {
-  auto: 'Auto (Recommended)',
+  auto: 'Microphone (Recommended)',
   tab: 'Tab Audio',
   'system+mic': 'System Audio + Microphone',
   'mic-only': 'Microphone Only',
@@ -188,7 +188,7 @@ function statusLabel(status: SessionStatus): string {
     case 'idle':
       return 'Ready to record';
     case 'connecting':
-      return 'Connecting to backend...';
+      return 'Starting speech recognition...';
     case 'recording':
       return 'Recording in progress';
     case 'transcribing':
@@ -387,9 +387,9 @@ export default function App() {
 
       {/* Privacy notice */}
       <div style={s.privacy}>
-        Audio is streamed to your configured backend for transcription.
+        Speech is transcribed in your browser using Chrome's built-in speech recognition.
         <br />
-        No audio is stored locally.
+        No backend server required.
       </div>
     </div>
   );

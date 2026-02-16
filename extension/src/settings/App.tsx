@@ -352,6 +352,9 @@ export default function App() {
         {/* Transcription */}
         <div style={s.section}>
           <div style={s.sectionTitle}>Transcription</div>
+          <div style={s.sectionDesc}>
+            Uses Chrome's built-in speech recognition — no backend server needed.
+          </div>
 
           <div style={s.toggleRow}>
             <div>
@@ -373,56 +376,6 @@ export default function App() {
                   left: settings.diarizationEnabled ? 23 : 3,
                 }}
               />
-            </div>
-          </div>
-
-          <div>
-            <span style={s.label}>Provider</span>
-            <select
-              style={s.select}
-              value={settings.transcriptionProvider}
-              onChange={(e) =>
-                updateField('transcriptionProvider', e.target.value as 'mock' | 'deepgram')
-              }
-            >
-              <option value="mock">Mock (Development)</option>
-              <option value="deepgram">Deepgram</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Backend */}
-        <div style={s.section}>
-          <div style={s.sectionTitle}>Backend</div>
-          <div>
-            <span style={s.label}>WebSocket URL</span>
-            <input
-              style={s.input}
-              value={settings.backendUrl}
-              onChange={(e) => updateField('backendUrl', e.target.value)}
-              placeholder="ws://localhost:3001"
-              onFocus={(e) => { e.currentTarget.style.borderColor = colors.accent; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = colors.border; }}
-            />
-          </div>
-          <div>
-            <span style={s.label}>Native Bridge Port</span>
-            <input
-              style={s.input}
-              type="number"
-              value={settings.nativeBridgePort ?? ''}
-              onChange={(e) =>
-                updateField(
-                  'nativeBridgePort',
-                  e.target.value ? parseInt(e.target.value, 10) : null
-                )
-              }
-              placeholder="Leave empty to disable"
-              onFocus={(e) => { e.currentTarget.style.borderColor = colors.accent; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = colors.border; }}
-            />
-            <div style={{ fontSize: 12, color: colors.textDim, marginTop: 4 }}>
-              Port for the native audio bridge app. Leave empty if not using system audio capture.
             </div>
           </div>
         </div>

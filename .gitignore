@@ -1,6 +1,6 @@
 node_modules/
-dist/
 build/
+!extension/dist/
 .env
 .env.local
 *.log

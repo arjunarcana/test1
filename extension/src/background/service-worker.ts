@@ -1,34 +1,21 @@
 import type {
   SessionState,
   TranscriptSegment,
-  UserSettings,
   CaptureSource,
 } from '../shared/types.ts';
 import { DEFAULT_SESSION_STATE } from '../shared/types.ts';
 import { MSG } from '../shared/protocol.ts';
-import type { ServerMessage, ClientMessage } from '../shared/protocol.ts';
-import { getSettings, getSessionState, saveSessionState, clearSessionState } from '../shared/storage.ts';
-import { startMicCapture, startTabCapture, stopCapture } from './audio-capture.ts';
-import { NativeBridge } from './native-bridge.ts';
+import { getSettings, getSessionState, saveSessionState } from '../shared/storage.ts';
 
 /* ─── State ───────────────────────────────────────────────────────────────── */
 
-let ws: WebSocket | null = null;
 let sessionState: SessionState = { ...DEFAULT_SESSION_STATE };
-let settings: UserSettings | null = null;
-let nativeBridge: NativeBridge | null = null;
-let audioSequence = 0;
-let audioBuffer: string[] = [];
-let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 5;
-const RECONNECT_BASE_DELAY = 1000;
 
 /* ─── Helpers ─────────────────────────────────────────────────────────────── */
 
 function broadcastState(partial: Partial<SessionState>): void {
   sessionState = { ...sessionState, ...partial };
 
-  // Broadcast to all extension views (popup, sidepanel)
   chrome.runtime.sendMessage({
     type: MSG.SESSION_STATE_UPDATE,
     payload: partial,
@@ -36,7 +23,6 @@ function broadcastState(partial: Partial<SessionState>): void {
     // No listeners - that's fine (views may be closed)
   });
 
-  // Persist to session storage
   saveSessionState(partial).catch(console.error);
 }
 
@@ -51,7 +37,6 @@ let offscreenCreated = false;
 async function ensureOffscreenDocument(): Promise<void> {
   if (offscreenCreated) return;
 
-  // Check if offscreen document already exists
   const existingContexts = await chrome.runtime.getContexts({
     contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
   });
@@ -64,7 +49,7 @@ async function ensureOffscreenDocument(): Promise<void> {
   await chrome.offscreen.createDocument({
     url: 'src/offscreen/index.html',
     reasons: [chrome.offscreen.Reason.USER_MEDIA],
-    justification: 'Audio capture for meeting transcription',
+    justification: 'Speech recognition for meeting transcription',
   });
   offscreenCreated = true;
 }
@@ -79,215 +64,10 @@ async function closeOffscreenDocument(): Promise<void> {
   offscreenCreated = false;
 }
 
-/* ─── WebSocket connection ────────────────────────────────────────────────── */
-
-function connectWebSocket(userSettings: UserSettings): Promise<void> {
-  return new Promise((resolve, reject) => {
-    try {
-      ws = new WebSocket(userSettings.backendUrl);
-
-      ws.onopen = () => {
-        console.log('[service-worker] WebSocket connected');
-        reconnectAttempts = 0;
-
-        // Send start_session message
-        const startMsg: ClientMessage = {
-          type: 'start_session',
-          payload: {
-            language: userSettings.language,
-            diarization: userSettings.diarizationEnabled,
-            names: userSettings.names,
-            provider: userSettings.transcriptionProvider,
-          },
-        };
-        ws!.send(JSON.stringify(startMsg));
-
-        // Flush any buffered audio
-        if (audioBuffer.length > 0) {
-          for (const chunk of audioBuffer) {
-            sendAudioChunk(chunk);
-          }
-          audioBuffer = [];
-        }
-
-        resolve();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data) as ServerMessage;
-          handleServerMessage(msg);
-        } catch (err) {
-          console.error('[service-worker] Failed to parse server message:', err);
-        }
-      };
-
-      ws.onerror = (event) => {
-        console.error('[service-worker] WebSocket error:', event);
-      };
-
-      ws.onclose = (event) => {
-        console.log('[service-worker] WebSocket closed:', event.code, event.reason);
-        ws = null;
-
-        // Attempt reconnection if still recording
-        if (
-          sessionState.status === 'recording' ||
-          sessionState.status === 'transcribing'
-        ) {
-          attemptReconnect();
-        }
-      };
-    } catch (err) {
-      reject(err);
-    }
-  });
-}
-
-function attemptReconnect(): void {
-  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    broadcastState({
-      status: 'error',
-      error: 'Lost connection to backend after multiple retries',
-    });
-    return;
-  }
-
-  reconnectAttempts++;
-  const delay = RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempts - 1);
-  console.log(`[service-worker] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
-
-  setTimeout(async () => {
-    if (!settings) return;
-    try {
-      await connectWebSocket(settings);
-    } catch {
-      attemptReconnect();
-    }
-  }, delay);
-}
-
-function sendAudioChunk(base64Data: string): void {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    // Buffer audio during brief disconnects
-    audioBuffer.push(base64Data);
-    if (audioBuffer.length > 100) {
-      audioBuffer.shift(); // Keep buffer bounded
-    }
-    return;
-  }
-
-  const msg: ClientMessage = {
-    type: 'audio_data',
-    payload: {
-      data: base64Data,
-      sequence: audioSequence++,
-    },
-  };
-  ws.send(JSON.stringify(msg));
-}
-
-/* ─── Server message handlers ─────────────────────────────────────────────── */
-
-function handleServerMessage(msg: ServerMessage): void {
-  switch (msg.type) {
-    case 'session_started': {
-      broadcastState({
-        status: 'recording',
-        sessionId: msg.payload.sessionId,
-      });
-      break;
-    }
-
-    case 'transcript_partial': {
-      const segment: TranscriptSegment = {
-        id: msg.payload.id,
-        text: msg.payload.text,
-        speaker: msg.payload.speaker,
-        timestamp: msg.payload.timestamp,
-        isFinal: false,
-      };
-      // Update or add the partial segment
-      const segments = [...sessionState.segments];
-      const idx = segments.findIndex((s) => s.id === segment.id);
-      if (idx >= 0) {
-        segments[idx] = segment;
-      } else {
-        segments.push(segment);
-      }
-      broadcastState({ segments });
-      break;
-    }
-
-    case 'transcript_final': {
-      const segment: TranscriptSegment = {
-        id: msg.payload.id,
-        text: msg.payload.text,
-        speaker: msg.payload.speaker,
-        timestamp: msg.payload.timestamp,
-        isFinal: true,
-      };
-      const segments = [...sessionState.segments];
-      const idx = segments.findIndex((s) => s.id === segment.id);
-      if (idx >= 0) {
-        segments[idx] = segment;
-      } else {
-        segments.push(segment);
-      }
-      broadcastState({ segments });
-      break;
-    }
-
-    case 'rolling_summary': {
-      broadcastState({
-        rollingSummary: {
-          content: msg.payload.content,
-          windowStart: msg.payload.windowStart,
-          windowEnd: msg.payload.windowEnd,
-          updatedAt: Date.now(),
-        },
-      });
-      break;
-    }
-
-    case 'global_summary': {
-      broadcastState({ globalSummary: msg.payload.content });
-      break;
-    }
-
-    case 'mention_detected': {
-      const mention = {
-        name: msg.payload.name,
-        context: msg.payload.context,
-        timestamp: msg.payload.timestamp,
-        sentiment: msg.payload.sentiment,
-      };
-      broadcastState({
-        mentions: [...sessionState.mentions, mention],
-      });
-      break;
-    }
-
-    case 'error': {
-      console.error('[service-worker] Server error:', msg.payload.message);
-      broadcastState({
-        status: 'error',
-        error: msg.payload.message,
-      });
-      break;
-    }
-  }
-}
-
 /* ─── Recording lifecycle ─────────────────────────────────────────────────── */
 
 async function startRecording(source: CaptureSource): Promise<void> {
-  // Reset state
-  audioSequence = 0;
-  audioBuffer = [];
-  reconnectAttempts = 0;
-
-  settings = await getSettings();
+  const settings = await getSettings();
 
   const sessionId = generateSessionId();
   broadcastState({
@@ -302,48 +82,27 @@ async function startRecording(source: CaptureSource): Promise<void> {
     error: null,
   });
 
-  // Determine effective source
-  const effectiveSource = source === 'auto' ? determineAutoSource(settings) : source;
-
   try {
-    // Start audio capture
-    switch (effectiveSource) {
-      case 'mic-only': {
-        await ensureOffscreenDocument();
-        await startMicCapture();
-        break;
-      }
-      case 'tab': {
-        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!activeTab?.id) throw new Error('No active tab found');
-        await ensureOffscreenDocument();
-        await startTabCapture(activeTab.id);
-        break;
-      }
-      case 'system+mic': {
-        if (settings.nativeBridgePort) {
-          nativeBridge = new NativeBridge();
-          nativeBridge.onAudioFrame = (data: string) => sendAudioChunk(data);
-          nativeBridge.onError = (err: string) => {
-            broadcastState({ status: 'error', error: `Native bridge error: ${err}` });
-          };
-          await nativeBridge.connect(settings.nativeBridgePort);
-          await nativeBridge.startCapture(1);
-        } else {
-          // Fallback to mic-only if no native bridge
-          await ensureOffscreenDocument();
-          await startMicCapture();
-        }
-        break;
-      }
-      default: {
-        await ensureOffscreenDocument();
-        await startMicCapture();
-      }
-    }
+    await ensureOffscreenDocument();
 
-    // Connect to backend WebSocket
-    await connectWebSocket(settings);
+    // Map language code to BCP-47 format for Speech Recognition
+    const langMap: Record<string, string> = {
+      en: 'en-US',
+      es: 'es-ES',
+      fr: 'fr-FR',
+      de: 'de-DE',
+      pt: 'pt-BR',
+      ja: 'ja-JP',
+      zh: 'zh-CN',
+    };
+    const language = langMap[settings.language] ?? 'en-US';
+
+    // Tell offscreen to start speech recognition
+    await chrome.runtime.sendMessage({
+      type: MSG.OFFSCREEN_START_MIC,
+      target: 'offscreen',
+      payload: { language },
+    });
 
     broadcastState({ status: 'recording' });
   } catch (err) {
@@ -354,48 +113,22 @@ async function startRecording(source: CaptureSource): Promise<void> {
   }
 }
 
-function determineAutoSource(userSettings: UserSettings): CaptureSource {
-  if (userSettings.nativeBridgePort) return 'system+mic';
-  return 'mic-only';
-}
-
 async function stopRecording(): Promise<void> {
-  // Send stop_session to backend
-  if (ws && ws.readyState === WebSocket.OPEN && sessionState.sessionId) {
-    const stopMsg: ClientMessage = {
-      type: 'stop_session',
-      payload: { sessionId: sessionState.sessionId },
-    };
-    ws.send(JSON.stringify(stopMsg));
-  }
-
   await cleanupRecording();
-
   broadcastState({ status: 'stopped' });
 }
 
 async function cleanupRecording(): Promise<void> {
-  // Close WebSocket
-  if (ws) {
-    ws.onclose = null; // Prevent reconnect attempt
-    ws.close();
-    ws = null;
-  }
-
-  // Stop audio capture
+  // Stop speech recognition
   try {
-    await stopCapture();
+    await chrome.runtime.sendMessage({
+      type: MSG.OFFSCREEN_STOP,
+      target: 'offscreen',
+    });
   } catch {
-    // Ignore errors during cleanup
+    // Offscreen document may already be closed
   }
 
-  // Disconnect native bridge
-  if (nativeBridge) {
-    nativeBridge.disconnect();
-    nativeBridge = null;
-  }
-
-  // Close offscreen document
   await closeOffscreenDocument();
 }
 
@@ -409,13 +142,13 @@ chrome.runtime.onMessage.addListener(
   ) => {
     switch (message.type) {
       case MSG.START_RECORDING: {
-        const source = (message.payload?.source as CaptureSource) ?? 'auto';
+        const source = (message.payload?.source as CaptureSource) ?? 'mic-only';
         startRecording(source)
           .then(() => sendResponse({ success: true }))
           .catch((err) =>
             sendResponse({ success: false, error: err instanceof Error ? err.message : 'Unknown error' })
           );
-        return true; // Keep channel open for async response
+        return true;
       }
 
       case MSG.STOP_RECORDING: {
@@ -443,11 +176,60 @@ chrome.runtime.onMessage.addListener(
         return false;
       }
 
-      case MSG.OFFSCREEN_AUDIO_CHUNK: {
-        const data = message.payload?.data as string | undefined;
-        if (data) {
-          sendAudioChunk(data);
+      /* ─── Transcript messages from offscreen ─────────────────────────── */
+
+      case MSG.OFFSCREEN_TRANSCRIPT_PARTIAL: {
+        const { id, text, timestamp } = message.payload as {
+          id: string;
+          text: string;
+          timestamp: number;
+        };
+        const segment: TranscriptSegment = {
+          id,
+          text,
+          timestamp,
+          isFinal: false,
+        };
+        const segments = [...sessionState.segments];
+        const idx = segments.findIndex((s) => s.id === segment.id);
+        if (idx >= 0) {
+          segments[idx] = segment;
+        } else {
+          segments.push(segment);
         }
+        broadcastState({ segments });
+        return false;
+      }
+
+      case MSG.OFFSCREEN_TRANSCRIPT_FINAL: {
+        const { id, text, timestamp } = message.payload as {
+          id: string;
+          text: string;
+          timestamp: number;
+        };
+        const segment: TranscriptSegment = {
+          id,
+          text,
+          timestamp,
+          isFinal: true,
+        };
+        const segments = [...sessionState.segments];
+        const idx = segments.findIndex((s) => s.id === segment.id);
+        if (idx >= 0) {
+          segments[idx] = segment;
+        } else {
+          segments.push(segment);
+        }
+        broadcastState({ segments });
+
+        // Check for name mentions
+        checkMentions(text, timestamp);
+        return false;
+      }
+
+      case MSG.OFFSCREEN_SPEECH_ERROR: {
+        const error = (message.payload?.error as string) ?? 'Speech recognition error';
+        broadcastState({ status: 'error', error });
         return false;
       }
 
@@ -457,13 +239,35 @@ chrome.runtime.onMessage.addListener(
   }
 );
 
+/* ─── Mention detection (local) ───────────────────────────────────────────── */
+
+async function checkMentions(text: string, timestamp: number): Promise<void> {
+  const settings = await getSettings();
+  if (settings.names.length === 0) return;
+
+  const lower = text.toLowerCase();
+  for (const name of settings.names) {
+    if (lower.includes(name.toLowerCase())) {
+      const mentions = [
+        ...sessionState.mentions,
+        {
+          name,
+          context: text,
+          timestamp,
+          sentiment: 'neutral',
+        },
+      ];
+      broadcastState({ mentions });
+    }
+  }
+}
+
 /* ─── Restore state on service worker restart ─────────────────────────────── */
 
 (async () => {
   try {
     const savedState = await getSessionState();
     if (savedState.status === 'recording' || savedState.status === 'transcribing') {
-      // Service worker restarted mid-session - mark as error
       sessionState = {
         ...savedState,
         status: 'error',
@@ -474,7 +278,6 @@ chrome.runtime.onMessage.addListener(
       sessionState = savedState;
     }
   } catch {
-    // First run or corrupted state - use defaults
     sessionState = { ...DEFAULT_SESSION_STATE };
   }
 })();
