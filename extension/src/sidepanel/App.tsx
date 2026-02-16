@@ -194,6 +194,10 @@ export default function App() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const shouldRestartRef = useRef(false);
   const segCounterRef = useRef(0);
+  const [micStatus, setMicStatus] = useState<'idle' | 'requesting' | 'listening' | 'error'>('idle');
+  const [micError, setMicError] = useState<string | null>(null);
+  // Keep a ref so the stream can be stopped on cleanup
+  const micStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     const isRecording = session.status === 'recording';
@@ -201,6 +205,8 @@ export default function App() {
     if (isRecording && SpeechRecognitionCtor && !recognitionRef.current) {
       shouldRestartRef.current = true;
       segCounterRef.current = 0;
+      setMicStatus('requesting');
+      setMicError(null);
 
       const langMap: Record<string, string> = {
         en: 'en-US', es: 'es-ES', fr: 'fr-FR',
@@ -210,6 +216,19 @@ export default function App() {
       const startRecognition = async () => {
         const settings = await getSettings();
         const lang = langMap[settings.language] ?? 'en-US';
+
+        // Request mic permission explicitly — this triggers Chrome's permission
+        // dialog if not already granted. SpeechRecognition alone won't prompt.
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          micStreamRef.current = stream;
+          // Keep the stream alive — SpeechRecognition needs the mic available
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Microphone access denied';
+          setMicStatus('error');
+          setMicError(msg);
+          return;
+        }
 
         const createRecognition = () => {
           if (!shouldRestartRef.current || !SpeechRecognitionCtor) return;
@@ -255,19 +274,23 @@ export default function App() {
             const e = event as { error: string };
             if (e.error === 'no-speech' || e.error === 'aborted') return;
             console.error('[sidepanel] Speech error:', e.error);
+            setMicError(`Speech error: ${e.error}`);
           };
 
           rec.onend = () => {
             recognitionRef.current = null;
             if (shouldRestartRef.current) {
-              setTimeout(() => createRecognition(), 100);
+              setTimeout(() => createRecognition(), 200);
             }
           };
 
           try {
             rec.start();
+            setMicStatus('listening');
           } catch (err) {
             console.error('[sidepanel] Failed to start recognition:', err);
+            setMicStatus('error');
+            setMicError('Failed to start speech recognition');
           }
         };
 
@@ -277,23 +300,19 @@ export default function App() {
       startRecognition();
     }
 
-    if (!isRecording && recognitionRef.current) {
+    if (!isRecording && (recognitionRef.current || micStreamRef.current)) {
       shouldRestartRef.current = false;
-      try {
-        recognitionRef.current.abort();
-      } catch { /* already stopped */ }
-      recognitionRef.current = null;
-    }
-
-    return () => {
-      if (!isRecording) {
-        shouldRestartRef.current = false;
-        if (recognitionRef.current) {
-          try { recognitionRef.current.abort(); } catch { /* ok */ }
-          recognitionRef.current = null;
-        }
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch { /* already stopped */ }
+        recognitionRef.current = null;
       }
-    };
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((t) => t.stop());
+        micStreamRef.current = null;
+      }
+      setMicStatus('idle');
+      setMicError(null);
+    }
   }, [session.status]);
 
   // Elapsed timer
@@ -358,7 +377,17 @@ export default function App() {
             }}
           />
           <span style={s.headerTitle}>
-            {isActive ? 'Recording' : session.status === 'error' ? 'Error' : 'Idle'}
+            {isActive
+              ? micStatus === 'listening'
+                ? 'Listening'
+                : micStatus === 'requesting'
+                  ? 'Requesting mic...'
+                  : micStatus === 'error'
+                    ? 'Mic Error'
+                    : 'Recording'
+              : session.status === 'error'
+                ? 'Error'
+                : 'Idle'}
           </span>
         </div>
         {session.startedAt && <span style={s.timer}>{formatElapsed(displayElapsed)}</span>}
@@ -379,6 +408,20 @@ export default function App() {
           </button>
         ))}
       </div>
+
+      {/* Mic error banner */}
+      {micError && (
+        <div style={{
+          padding: '10px 16px',
+          background: 'rgba(255, 23, 68, 0.12)',
+          borderBottom: `1px solid ${colors.red}`,
+          fontSize: 13,
+          color: colors.red,
+          lineHeight: 1.4,
+        }}>
+          {micError}
+        </div>
+      )}
 
       {/* Content */}
       <div style={s.content}>
