@@ -261,7 +261,7 @@ export default function App() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tabId = tabs[0]?.id;
       if (tabId !== undefined) {
-        (chrome.sidePanel as chrome.sidePanel.SidePanel & {
+        (chrome.sidePanel as unknown as {
           open: (opts: { tabId: number }) => Promise<void>;
         }).open({ tabId });
       }
