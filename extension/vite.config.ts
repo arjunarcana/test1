@@ -12,6 +12,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         settings: 'src/settings/index.html',
+        permissions: 'src/permissions/index.html',
       },
     },
   },

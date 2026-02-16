@@ -5,8 +5,8 @@
     "src": "../../../../@crx/manifest",
     "isEntry": true
   },
-  "_client-CTQ0Ju4c.js": {
-    "file": "assets/client-CTQ0Ju4c.js",
+  "_client-DwHNpKhs.js": {
+    "file": "assets/client-DwHNpKhs.js",
     "name": "client"
   },
   "_protocol-B3sYiEtg.js": {
@@ -27,33 +27,42 @@
       "_protocol-B3sYiEtg.js"
     ]
   },
+  "src/permissions/index.html": {
+    "file": "assets/permissions-dfDot2OE.js",
+    "name": "permissions",
+    "src": "src/permissions/index.html",
+    "isEntry": true,
+    "imports": [
+      "_client-DwHNpKhs.js"
+    ]
+  },
   "src/popup/index.html": {
-    "file": "assets/index.html-Ci6oXogd.js",
+    "file": "assets/index.html-C-Vy-d6A.js",
     "name": "index.html",
     "src": "src/popup/index.html",
     "isEntry": true,
     "imports": [
-      "_client-CTQ0Ju4c.js",
+      "_client-DwHNpKhs.js",
       "_protocol-B3sYiEtg.js"
     ]
   },
   "src/settings/index.html": {
-    "file": "assets/settings-DGs5B32H.js",
+    "file": "assets/settings-Cve4MGkG.js",
     "name": "settings",
     "src": "src/settings/index.html",
     "isEntry": true,
     "imports": [
-      "_client-CTQ0Ju4c.js",
+      "_client-DwHNpKhs.js",
       "_storage-CtxbkhRB.js"
     ]
   },
   "src/sidepanel/index.html": {
-    "file": "assets/index.html-Cq9YeDXy.js",
+    "file": "assets/index.html-DijtQLH0.js",
     "name": "index.html",
     "src": "src/sidepanel/index.html",
     "isEntry": true,
     "imports": [
-      "_client-CTQ0Ju4c.js",
+      "_client-DwHNpKhs.js",
       "_storage-CtxbkhRB.js",
       "_protocol-B3sYiEtg.js"
     ]

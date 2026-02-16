@@ -243,17 +243,19 @@ export default function App() {
         await chrome.runtime.sendMessage({ type: MSG.STOP_RECORDING });
         setStatus('stopped');
       } else {
-        // Request mic permission from popup (popups can show permission dialogs;
-        // side panels cannot). Once granted, permission persists for the
-        // chrome-extension:// origin so the side panel can use SpeechRecognition.
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          // Immediately release — we only needed the permission grant
-          stream.getTracks().forEach((t) => t.stop());
-        } catch (micErr) {
-          const msg = micErr instanceof Error ? micErr.message : 'Microphone access denied';
-          setError(`Mic permission needed: ${msg}`);
-          setStatus('error');
+        // Check if mic permission is already granted. Popups and side panels
+        // can't reliably show permission dialogs (they close/dismiss), so we
+        // open a dedicated tab when permission hasn't been granted yet.
+        const permResult = await navigator.permissions.query({
+          name: 'microphone' as PermissionName,
+        });
+
+        if (permResult.state !== 'granted') {
+          // Open the permissions page in a full tab (tabs CAN show dialogs)
+          chrome.tabs.create({
+            url: chrome.runtime.getURL('src/permissions/index.html'),
+          });
+          setError('Please grant microphone access in the new tab, then try again.');
           setLoading(false);
           return;
         }
