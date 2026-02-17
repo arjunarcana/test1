@@ -22,6 +22,7 @@ interface SpeechRecognitionLike {
   onresult: ((event: unknown) => void) | null;
   onerror: ((event: unknown) => void) | null;
   onend: (() => void) | null;
+  onaudiostart: (() => void) | null;
   start(): void;
   abort(): void;
 }
@@ -45,6 +46,10 @@ const SpeechRecognitionCtor = (
 let recognition: SpeechRecognitionLike | null = null;
 let shouldRestart = false;
 let segCounter = 0;
+// Keep the mic stream alive so SpeechRecognition can access the mic.
+// Stopping the stream before SpeechRecognition starts leaves the mic in
+// a dead state in Chrome extension contexts.
+let micStream: MediaStream | null = null;
 
 function send(type: string, payload: Record<string, unknown>) {
   chrome.runtime.sendMessage({ type, payload }).catch((err) => {
@@ -62,6 +67,10 @@ function createRecognition(lang: string) {
   rec.maxAlternatives = 1;
   recognition = rec;
 
+  rec.onaudiostart = () => {
+    console.log('[offscreen] Audio capture started');
+  };
+
   rec.onresult = (event: unknown) => {
     const e = event as SpeechResultEvent;
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -78,7 +87,11 @@ function createRecognition(lang: string) {
 
   rec.onerror = (event: unknown) => {
     const e = event as { error: string };
-    if (e.error === 'aborted' || e.error === 'no-speech') return;
+    if (e.error === 'aborted') return;
+    if (e.error === 'no-speech') {
+      console.log('[offscreen] no-speech, restarting...');
+      return;
+    }
     console.error('[offscreen] Speech error:', e.error);
     send('SPEECH_STATUS', { status: 'error', error: `Speech error: ${e.error}` });
   };
@@ -100,12 +113,10 @@ function createRecognition(lang: string) {
 }
 
 async function startSpeech(lang: string) {
-  // Acquire mic permission in the offscreen context — the popup/permissions
-  // page granted it for the extension origin, but offscreen documents need
-  // their own getUserMedia call to unlock it.
+  // Keep mic stream alive — SpeechRecognition in extension contexts needs
+  // an active getUserMedia stream to work reliably. Do NOT stop the tracks.
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((t) => t.stop());
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
     console.error('[offscreen] Mic access failed:', err);
     send('SPEECH_STATUS', {
@@ -125,6 +136,10 @@ function stopSpeech() {
   if (recognition) {
     try { recognition.abort(); } catch { /* already stopped */ }
     recognition = null;
+  }
+  if (micStream) {
+    micStream.getTracks().forEach((t) => t.stop());
+    micStream = null;
   }
 }
 
