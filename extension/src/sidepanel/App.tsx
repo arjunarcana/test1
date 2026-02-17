@@ -214,8 +214,22 @@ export default function App() {
         const settings = await getSettings();
         const lang = langMap[settings.language] ?? 'en-US';
 
-        // Mic permission was already granted from the popup before recording
-        // started, so SpeechRecognition can access the mic directly here.
+        // Verify mic access in the side panel context.  After an extension
+        // reload Chrome may revoke the stream; getUserMedia re-establishes it.
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          // Release the stream — SpeechRecognition opens its own.
+          stream.getTracks().forEach((t) => t.stop());
+        } catch (err) {
+          console.error('[sidepanel] Mic access failed:', err);
+          setMicStatus('error');
+          setMicError('Microphone not accessible. Re-open the side panel or grant permission again.');
+          return;
+        }
+
+        let noSpeechCount = 0;
+        let gotResult = false;
+
         const createRecognition = () => {
           if (!shouldRestartRef.current || !SpeechRecognitionCtor) return;
 
@@ -227,6 +241,8 @@ export default function App() {
           recognitionRef.current = rec;
 
           rec.onresult = (event: unknown) => {
+            gotResult = true;
+            noSpeechCount = 0;
             const e = event as SpeechResultEvent;
             for (let i = e.resultIndex; i < e.results.length; i++) {
               const result = e.results[i];
@@ -269,7 +285,15 @@ export default function App() {
 
           rec.onerror = (event: unknown) => {
             const e = event as { error: string };
-            if (e.error === 'no-speech' || e.error === 'aborted') return;
+            if (e.error === 'aborted') return;
+            if (e.error === 'no-speech') {
+              noSpeechCount++;
+              if (noSpeechCount >= 3 && !gotResult) {
+                setMicStatus('error');
+                setMicError('No audio detected. Check your mic or close other apps using it.');
+              }
+              return;
+            }
             console.error('[sidepanel] Speech error:', e.error);
             setMicStatus('error');
             setMicError(`Speech error: ${e.error}`);
