@@ -192,6 +192,7 @@ export default function App() {
 
   // ─── Speech Recognition: runs in side panel page context ─────────────────
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const shouldRestartRef = useRef(false);
   const segCounterRef = useRef(0);
   const [micStatus, setMicStatus] = useState<'idle' | 'listening' | 'error'>('idle');
@@ -213,6 +214,21 @@ export default function App() {
       const startRecognition = async () => {
         const settings = await getSettings();
         const lang = langMap[settings.language] ?? 'en-US';
+
+        // Explicitly acquire mic access in the side panel context first.
+        // Without this, webkitSpeechRecognition starts silently but never
+        // receives audio in extension side panels.
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          // Keep stream alive while recording — stopping tracks can kill the mic
+          // We'll stop it when recording ends
+          streamRef.current = stream;
+        } catch (err) {
+          console.error('[sidepanel] getUserMedia failed:', err);
+          setMicStatus('error');
+          setMicError('Microphone access denied. Please grant mic permission and try again.');
+          return;
+        }
 
         const createRecognition = () => {
           if (!shouldRestartRef.current || !SpeechRecognitionCtor) return;
@@ -264,7 +280,8 @@ export default function App() {
 
           rec.onerror = (event: unknown) => {
             const e = event as { error: string };
-            if (e.error === 'aborted' || e.error === 'no-speech') return;
+            // These are transient — recognition will auto-restart via onend
+            if (e.error === 'aborted' || e.error === 'no-speech' || e.error === 'network') return;
             console.error('[sidepanel] Speech error:', e.error);
             setMicStatus('error');
             setMicError(`Speech error: ${e.error}`);
@@ -273,7 +290,10 @@ export default function App() {
           rec.onend = () => {
             recognitionRef.current = null;
             if (shouldRestartRef.current) {
-              setTimeout(() => createRecognition(), 200);
+              // Clear any transient error on restart
+              setMicStatus('listening');
+              setMicError(null);
+              setTimeout(() => createRecognition(), 300);
             }
           };
 
@@ -293,10 +313,15 @@ export default function App() {
       startRecognition();
     }
 
-    if (!isRecording && recognitionRef.current) {
+    if (!isRecording && (recognitionRef.current || streamRef.current)) {
       shouldRestartRef.current = false;
-      try { recognitionRef.current.abort(); } catch { /* already stopped */ }
+      try { recognitionRef.current?.abort(); } catch { /* already stopped */ }
       recognitionRef.current = null;
+      // Release the mic
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
       setMicStatus('idle');
       setMicError(null);
     }
