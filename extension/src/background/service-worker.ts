@@ -30,41 +30,10 @@ function generateSessionId(): string {
   return `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/* ─── Offscreen document management ──────────────────────────────────────── */
-
-const OFFSCREEN_URL = 'src/offscreen/index.html';
-
-async function ensureOffscreen(): Promise<void> {
-  const contexts = await (chrome.runtime as unknown as {
-    getContexts: (filter: { contextTypes: string[] }) => Promise<{ documentUrl?: string }[]>;
-  }).getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
-
-  if (contexts.some((c) => c.documentUrl?.endsWith(OFFSCREEN_URL))) return;
-
-  await chrome.offscreen.createDocument({
-    url: OFFSCREEN_URL,
-    reasons: [chrome.offscreen.Reason.USER_MEDIA],
-    justification: 'SpeechRecognition requires a full renderer context',
-  });
-}
-
-async function removeOffscreen(): Promise<void> {
-  try {
-    await chrome.offscreen.closeDocument();
-  } catch { /* no document open */ }
-}
-
 /* ─── Recording lifecycle ─────────────────────────────────────────────────── */
 
 async function startRecording(source: CaptureSource): Promise<void> {
   const sessionId = generateSessionId();
-  const settings = await getSettings();
-
-  const langMap: Record<string, string> = {
-    en: 'en-US', es: 'es-ES', fr: 'fr-FR',
-    de: 'de-DE', pt: 'pt-BR', ja: 'ja-JP', zh: 'zh-CN',
-  };
-  const lang = langMap[settings.language] ?? 'en-US';
 
   broadcastState({
     status: 'recording',
@@ -77,17 +46,10 @@ async function startRecording(source: CaptureSource): Promise<void> {
     startedAt: Date.now(),
     error: null,
   });
-
-  // Launch offscreen document for SpeechRecognition
-  await ensureOffscreen();
-  chrome.runtime.sendMessage({ type: 'START_SPEECH', payload: { lang } }).catch(() => {});
 }
 
 async function stopRecording(): Promise<void> {
-  chrome.runtime.sendMessage({ type: 'STOP_SPEECH' }).catch(() => {});
   broadcastState({ status: 'stopped' });
-  // Clean up after a short delay to let the stop message arrive
-  setTimeout(() => removeOffscreen(), 500);
 }
 
 /* ─── Message listener ────────────────────────────────────────────────────── */
@@ -134,19 +96,15 @@ chrome.runtime.onMessage.addListener(
         return false;
       }
 
-      /* ─── Transcript from offscreen document ──────────────────────── */
+      /* ─── Transcript messages from side panel ────────────────────────── */
 
-      case 'SPEECH_RESULT':
-      case MSG.TRANSCRIPT_PARTIAL:
-      case MSG.TRANSCRIPT_FINAL: {
-        const { id, text, timestamp, isFinal } = message.payload as {
+      case MSG.TRANSCRIPT_PARTIAL: {
+        const { id, text, timestamp } = message.payload as {
           id: string;
           text: string;
           timestamp: number;
-          isFinal?: boolean;
         };
-        const final = message.type === MSG.TRANSCRIPT_FINAL || (isFinal === true);
-        const segment: TranscriptSegment = { id, text, timestamp, isFinal: final };
+        const segment: TranscriptSegment = { id, text, timestamp, isFinal: false };
         const segments = [...sessionState.segments];
         const idx = segments.findIndex((s) => s.id === segment.id);
         if (idx >= 0) {
@@ -155,21 +113,25 @@ chrome.runtime.onMessage.addListener(
           segments.push(segment);
         }
         broadcastState({ segments });
-
-        if (final) checkMentions(text, timestamp);
         return false;
       }
 
-      case 'SPEECH_STATUS': {
-        // Forward mic status to side panel
-        const { status: micStatus, error: micError } = message.payload as {
-          status: string;
-          error?: string;
+      case MSG.TRANSCRIPT_FINAL: {
+        const { id, text, timestamp } = message.payload as {
+          id: string;
+          text: string;
+          timestamp: number;
         };
-        chrome.runtime.sendMessage({
-          type: 'MIC_STATUS_UPDATE',
-          payload: { micStatus, micError: micError ?? null },
-        }).catch(() => {});
+        const segment: TranscriptSegment = { id, text, timestamp, isFinal: true };
+        const segments = [...sessionState.segments];
+        const idx = segments.findIndex((s) => s.id === segment.id);
+        if (idx >= 0) {
+          segments[idx] = segment;
+        } else {
+          segments.push(segment);
+        }
+        broadcastState({ segments });
+        checkMentions(text, timestamp);
         return false;
       }
 

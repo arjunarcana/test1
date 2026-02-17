@@ -17,26 +17,18 @@
     "file": "assets/protocol-B3sYiEtg.js",
     "name": "protocol"
   },
-  "_storage-BIXbzm5g.js": {
-    "file": "assets/storage-BIXbzm5g.js",
-    "name": "storage",
-    "imports": [
-      "_types-IWAbOwLi.js"
-    ]
-  },
-  "_types-IWAbOwLi.js": {
-    "file": "assets/types-IWAbOwLi.js",
-    "name": "types"
+  "_storage-CtxbkhRB.js": {
+    "file": "assets/storage-CtxbkhRB.js",
+    "name": "storage"
   },
   "src/background/service-worker.ts": {
-    "file": "assets/service-worker.ts-BjEaOC1c.js",
+    "file": "assets/service-worker.ts-CFpB8swO.js",
     "name": "service-worker.ts",
     "src": "src/background/service-worker.ts",
     "isEntry": true,
     "imports": [
-      "_types-IWAbOwLi.js",
-      "_protocol-B3sYiEtg.js",
-      "_storage-BIXbzm5g.js"
+      "_storage-CtxbkhRB.js",
+      "_protocol-B3sYiEtg.js"
     ]
   },
   "src/offscreen/index.html": {
@@ -70,26 +62,25 @@
     ]
   },
   "src/settings/index.html": {
-    "file": "assets/settings-BrXWHF21.js",
+    "file": "assets/settings-B4f2x9Sn.js",
     "name": "settings",
     "src": "src/settings/index.html",
     "isEntry": true,
     "imports": [
       "_modulepreload-polyfill-B5Qt9EMX.js",
       "_client-BuKOvt0v.js",
-      "_types-IWAbOwLi.js",
-      "_storage-BIXbzm5g.js"
+      "_storage-CtxbkhRB.js"
     ]
   },
   "src/sidepanel/index.html": {
-    "file": "assets/index.html-K1ieIqNo.js",
+    "file": "assets/index.html-Bl2D663q.js",
     "name": "index.html",
     "src": "src/sidepanel/index.html",
     "isEntry": true,
     "imports": [
       "_modulepreload-polyfill-B5Qt9EMX.js",
       "_client-BuKOvt0v.js",
-      "_types-IWAbOwLi.js",
+      "_storage-CtxbkhRB.js",
       "_protocol-B3sYiEtg.js"
     ]
   }

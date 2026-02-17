@@ -1,12 +1,42 @@
-import React, { useState, useEffect, useCallback, type CSSProperties } from 'react';
-import type { SessionState } from '../shared/types.ts';
+import React, { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
+import type { SessionState, TranscriptSegment } from '../shared/types.ts';
 import { DEFAULT_SESSION_STATE } from '../shared/types.ts';
 import { MSG } from '../shared/protocol.ts';
+import { getSettings } from '../shared/storage.ts';
 import Transcript from './components/Transcript.tsx';
 import RollingSummaryCard from './components/RollingSummary.tsx';
 import SummarySoFar from './components/SummarySoFar.tsx';
 import Mentions from './components/Mentions.tsx';
 import SessionComplete from './components/SessionComplete.tsx';
+
+/* ─── SpeechRecognition types (Chrome uses webkit prefix) ──────────────── */
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onresult: ((event: unknown) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  abort(): void;
+  stop(): void;
+}
+
+interface SpeechResultItem {
+  isFinal: boolean;
+  0: { transcript: string };
+}
+
+interface SpeechResultEvent {
+  resultIndex: number;
+  results: { length: number; [i: number]: SpeechResultItem };
+}
+
+const SpeechRecognitionCtor = (
+  window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike }
+).webkitSpeechRecognition;
 
 /* ─── Styles ──────────────────────────────────────────────────────────────── */
 
@@ -160,28 +190,113 @@ export default function App() {
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
 
-  // ─── Mic status from offscreen document (via service worker) ──────────────
+  // ─── Speech Recognition: runs in side panel page context ─────────────────
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const shouldRestartRef = useRef(false);
+  const segCounterRef = useRef(0);
   const [micStatus, setMicStatus] = useState<'idle' | 'listening' | 'error'>('idle');
   const [micError, setMicError] = useState<string | null>(null);
 
   useEffect(() => {
-    const listener = (message: { type: string; payload?: Record<string, unknown> }) => {
-      if (message.type === 'MIC_STATUS_UPDATE' && message.payload) {
-        const { micStatus: status, micError: error } = message.payload as {
-          micStatus: string;
-          micError: string | null;
-        };
-        setMicStatus(status as 'idle' | 'listening' | 'error');
-        setMicError(error);
-      }
-    };
-    chrome.runtime.onMessage.addListener(listener);
-    return () => chrome.runtime.onMessage.removeListener(listener);
-  }, []);
+    const isRecording = session.status === 'recording';
 
-  // Reset mic status when not recording
-  useEffect(() => {
-    if (session.status !== 'recording') {
+    if (isRecording && SpeechRecognitionCtor && !recognitionRef.current) {
+      shouldRestartRef.current = true;
+      segCounterRef.current = 0;
+      setMicError(null);
+
+      const langMap: Record<string, string> = {
+        en: 'en-US', es: 'es-ES', fr: 'fr-FR',
+        de: 'de-DE', pt: 'pt-BR', ja: 'ja-JP', zh: 'zh-CN',
+      };
+
+      const startRecognition = async () => {
+        const settings = await getSettings();
+        const lang = langMap[settings.language] ?? 'en-US';
+
+        const createRecognition = () => {
+          if (!shouldRestartRef.current || !SpeechRecognitionCtor) return;
+
+          const rec = new SpeechRecognitionCtor();
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.lang = lang;
+          rec.maxAlternatives = 1;
+          recognitionRef.current = rec;
+
+          rec.onresult = (event: unknown) => {
+            const e = event as SpeechResultEvent;
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+              const result = e.results[i];
+              const text = result[0].transcript.trim();
+              if (!text) continue;
+
+              const isFinal = result.isFinal;
+              const id = isFinal
+                ? `seg_${++segCounterRef.current}`
+                : `seg_${segCounterRef.current + 1}`;
+              const segment: TranscriptSegment = {
+                id,
+                text,
+                timestamp: Date.now(),
+                isFinal,
+              };
+
+              // Update local state immediately
+              setSession((prev) => {
+                const segMap = new Map(prev.segments.map((s) => [s.id, s]));
+                segMap.set(segment.id, segment);
+                return {
+                  ...prev,
+                  segments: Array.from(segMap.values()).sort(
+                    (a, b) => a.timestamp - b.timestamp
+                  ),
+                };
+              });
+
+              // Also notify background for persistence & mention detection
+              chrome.runtime.sendMessage({
+                type: isFinal ? MSG.TRANSCRIPT_FINAL : MSG.TRANSCRIPT_PARTIAL,
+                payload: { id: segment.id, text, timestamp: segment.timestamp },
+              }).catch(() => {});
+            }
+          };
+
+          rec.onerror = (event: unknown) => {
+            const e = event as { error: string };
+            if (e.error === 'aborted' || e.error === 'no-speech') return;
+            console.error('[sidepanel] Speech error:', e.error);
+            setMicStatus('error');
+            setMicError(`Speech error: ${e.error}`);
+          };
+
+          rec.onend = () => {
+            recognitionRef.current = null;
+            if (shouldRestartRef.current) {
+              setTimeout(() => createRecognition(), 200);
+            }
+          };
+
+          try {
+            rec.start();
+            setMicStatus('listening');
+          } catch (err) {
+            console.error('[sidepanel] Failed to start recognition:', err);
+            setMicStatus('error');
+            setMicError('Failed to start speech recognition');
+          }
+        };
+
+        createRecognition();
+      };
+
+      startRecognition();
+    }
+
+    if (!isRecording && recognitionRef.current) {
+      shouldRestartRef.current = false;
+      try { recognitionRef.current.abort(); } catch { /* already stopped */ }
+      recognitionRef.current = null;
       setMicStatus('idle');
       setMicError(null);
     }

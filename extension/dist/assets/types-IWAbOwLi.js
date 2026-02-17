@@ -1,1 +1,0 @@
-const n={names:[],language:"en",diarizationEnabled:!0,retentionDays:30},l={status:"idle",sessionId:null,source:"auto",segments:[],rollingSummary:null,globalSummary:null,mentions:[],startedAt:null,error:null};export{n as D,l as a};
