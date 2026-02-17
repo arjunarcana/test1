@@ -13,6 +13,7 @@ export default defineConfig({
       input: {
         settings: 'src/settings/index.html',
         permissions: 'src/permissions/index.html',
+        offscreen: 'src/offscreen/index.html',
       },
     },
   },

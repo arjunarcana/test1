@@ -6,7 +6,8 @@
   "permissions": [
     "tabs",
     "sidePanel",
-    "storage"
+    "storage",
+    "offscreen"
   ],
   "action": {
     "default_popup": "src/popup/index.html",
