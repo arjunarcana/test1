@@ -233,26 +233,37 @@ export default function App() {
               const text = result[0].transcript.trim();
               if (!text) continue;
 
-              if (result.isFinal) {
-                segCounterRef.current++;
-                chrome.runtime.sendMessage({
-                  type: MSG.TRANSCRIPT_FINAL,
-                  payload: {
-                    id: `seg_${segCounterRef.current}`,
-                    text,
-                    timestamp: Date.now(),
-                  },
-                }).catch(() => {});
-              } else {
-                chrome.runtime.sendMessage({
-                  type: MSG.TRANSCRIPT_PARTIAL,
-                  payload: {
-                    id: `seg_${segCounterRef.current + 1}`,
-                    text,
-                    timestamp: Date.now(),
-                  },
-                }).catch(() => {});
-              }
+              const isFinal = result.isFinal;
+              const id = isFinal
+                ? `seg_${++segCounterRef.current}`
+                : `seg_${segCounterRef.current + 1}`;
+              const segment: TranscriptSegment = {
+                id,
+                text,
+                timestamp: Date.now(),
+                isFinal,
+              };
+
+              // Update local state immediately so transcript renders without
+              // waiting for the background service-worker round-trip.
+              setSession((prev) => {
+                const segMap = new Map(prev.segments.map((s) => [s.id, s]));
+                segMap.set(segment.id, segment);
+                return {
+                  ...prev,
+                  segments: Array.from(segMap.values()).sort(
+                    (a, b) => a.timestamp - b.timestamp
+                  ),
+                };
+              });
+
+              // Also notify background for persistence & mention detection.
+              chrome.runtime.sendMessage({
+                type: isFinal ? MSG.TRANSCRIPT_FINAL : MSG.TRANSCRIPT_PARTIAL,
+                payload: { id: segment.id, text, timestamp: segment.timestamp },
+              }).catch((err) => {
+                console.warn('[sidepanel] Failed to send transcript to background:', err);
+              });
             }
           };
 
