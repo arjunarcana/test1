@@ -92,9 +92,10 @@ const s: Record<string, CSSProperties> = {
 
 interface Props {
   segments: TranscriptSegment[];
+  startedAt?: number | null;
 }
 
-export default function Transcript({ segments }: Props) {
+export default function Transcript({ segments, startedAt }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll on new segments
@@ -110,7 +111,7 @@ export default function Transcript({ segments }: Props) {
     <div style={s.container}>
       {segments.map((seg) => (
         <div key={seg.id} style={s.segment}>
-          <span style={s.timestamp}>{formatTimestamp(seg.timestamp)}</span>
+          <span style={s.timestamp}>{formatTimestamp(startedAt ? seg.timestamp - startedAt : seg.timestamp)}</span>
           <div style={s.body}>
             {seg.speaker && (
               <div style={{ ...s.speaker, color: getSpeakerColor(seg.speaker) }}>

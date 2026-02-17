@@ -333,6 +333,7 @@ export default function App() {
           globalSummary={session.globalSummary}
           mentions={session.mentions}
           duration={displayElapsed}
+          startedAt={session.startedAt}
           onReset={handleReset}
         />
       </div>
@@ -404,7 +405,7 @@ export default function App() {
 
       {/* Content */}
       <div style={s.content}>
-        {activeTab === 'transcript' && <Transcript segments={session.segments} />}
+        {activeTab === 'transcript' && <Transcript segments={session.segments} startedAt={session.startedAt} />}
         {activeTab === 'summary' && (
           <div style={{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
             <RollingSummaryCard summary={session.rollingSummary} />

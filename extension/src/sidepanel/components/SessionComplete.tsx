@@ -192,7 +192,8 @@ function buildMarkdown(
   segments: TranscriptSegment[],
   globalSummary: string | null,
   mentions: MentionEvent[],
-  duration: number
+  duration: number,
+  startedAt?: number | null
 ): string {
   let md = `# Meeting Notes\n\n`;
   md += `**Duration:** ${formatDuration(duration)}\n\n`;
@@ -211,7 +212,8 @@ function buildMarkdown(
 
   md += `## Transcript\n\n`;
   for (const seg of segments) {
-    const time = formatTimestamp(seg.timestamp);
+    const relativeMs = startedAt ? seg.timestamp - startedAt : seg.timestamp;
+    const time = formatTimestamp(relativeMs);
     const speaker = seg.speaker ? `**${seg.speaker}**: ` : '';
     md += `[${time}] ${speaker}${seg.text}\n\n`;
   }
@@ -233,6 +235,7 @@ interface Props {
   globalSummary: string | null;
   mentions: MentionEvent[];
   duration: number;
+  startedAt?: number | null;
   onReset: () => void;
 }
 
@@ -241,6 +244,7 @@ export default function SessionComplete({
   globalSummary,
   mentions,
   duration,
+  startedAt,
   onReset,
 }: Props) {
   const [toast, setToast] = useState<string | null>(null);
@@ -251,17 +255,17 @@ export default function SessionComplete({
   }, []);
 
   const handleCopy = useCallback(async () => {
-    const md = buildMarkdown(segments, globalSummary, mentions, duration);
+    const md = buildMarkdown(segments, globalSummary, mentions, duration, startedAt);
     try {
       await navigator.clipboard.writeText(md);
       showToast('Copied to clipboard');
     } catch {
       showToast('Failed to copy');
     }
-  }, [segments, globalSummary, mentions, duration, showToast]);
+  }, [segments, globalSummary, mentions, duration, startedAt, showToast]);
 
   const handleDownload = useCallback(() => {
-    const md = buildMarkdown(segments, globalSummary, mentions, duration);
+    const md = buildMarkdown(segments, globalSummary, mentions, duration, startedAt);
     const blob = new Blob([md], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -270,7 +274,7 @@ export default function SessionComplete({
     a.click();
     URL.revokeObjectURL(url);
     showToast('Downloaded');
-  }, [segments, globalSummary, mentions, duration, showToast]);
+  }, [segments, globalSummary, mentions, duration, startedAt, showToast]);
 
   const handleNotion = useCallback(() => {
     showToast('Notion integration coming soon');
