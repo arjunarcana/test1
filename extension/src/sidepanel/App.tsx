@@ -214,19 +214,6 @@ export default function App() {
         const settings = await getSettings();
         const lang = langMap[settings.language] ?? 'en-US';
 
-        // Verify mic access in the side panel context.  After an extension
-        // reload Chrome may revoke the stream; getUserMedia re-establishes it.
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          // Release the stream — SpeechRecognition opens its own.
-          stream.getTracks().forEach((t) => t.stop());
-        } catch (err) {
-          console.error('[sidepanel] Mic access failed:', err);
-          setMicStatus('error');
-          setMicError('Microphone not accessible. Re-open the side panel or grant permission again.');
-          return;
-        }
-
         let noSpeechCount = 0;
         let gotResult = false;
 
