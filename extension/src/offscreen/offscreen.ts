@@ -99,7 +99,22 @@ function createRecognition(lang: string) {
   }
 }
 
-function startSpeech(lang: string) {
+async function startSpeech(lang: string) {
+  // Acquire mic permission in the offscreen context — the popup/permissions
+  // page granted it for the extension origin, but offscreen documents need
+  // their own getUserMedia call to unlock it.
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => t.stop());
+  } catch (err) {
+    console.error('[offscreen] Mic access failed:', err);
+    send('SPEECH_STATUS', {
+      status: 'error',
+      error: 'Microphone not accessible. Please grant permission and try again.',
+    });
+    return;
+  }
+
   shouldRestart = true;
   segCounter = 0;
   createRecognition(lang);
